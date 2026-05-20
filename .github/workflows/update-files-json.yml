@@ -1,0 +1,36 @@
+name: Update files.json
+
+on:
+  push:
+    paths:
+      - 'data/*.xlsx'
+
+jobs:
+  update-files-json:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate files.json
+        run: |
+          cd data
+          FILES=$(ls *.xlsx 2>/dev/null | sort | python3 -c "
+          import sys, json
+          files = [line.strip() for line in sys.stdin if line.strip()]
+          print(json.dumps(files, ensure_ascii=False, indent=2))
+          ")
+          echo "$FILES" > files.json
+          echo "생성된 files.json:"
+          cat files.json
+
+      - name: Commit and push files.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/files.json
+          git diff --staged --quiet || git commit -m "chore: auto-update files.json"
+          git push
