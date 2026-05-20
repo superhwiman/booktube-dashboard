@@ -263,9 +263,11 @@ tbody tr:hover td{background:#FAFAFA}
   <div class="tbl-wrap">
     <table>
       <thead><tr>
-        <th>강사명</th><th>강의명</th><th>유형</th><th>플랫폼</th>
-        <th>정산 월</th><th class="nr">판매수량</th>
-        <th class="nr">합산 매출</th><th class="nr">귀속액</th><th>정산서</th>
+        <th>강사명</th>
+        <th class="nr">판매수량</th>
+        <th class="nr">총 누적 매출</th>
+        <th class="nr">귀속액</th>
+        <th>정산서</th>
       </tr></thead>
       <tbody id="tbody"><tr><td colspan="9" class="empty">파일을 업로드하면 강사별 정산 현황이 표시됩니다</td></tr></tbody>
     </table>
@@ -287,6 +289,17 @@ tbody tr:hover td{background:#FAFAFA}
   <div class="notice">
     ※ 귀속액 = 합산매출 × 배분율 &nbsp;|&nbsp; 실지급 분기별(1·4·7·10월) &nbsp;|&nbsp;
     엑셀 헤더: 정산월 · 플랫폼 · 강의명 · 강사명 · 유형 · 강의오픈일 · 판매수량 · 순매출 · 비고
+  </div>
+</div>
+
+<!-- 강사 상세 팝업 -->
+<div class="modal-overlay" id="detail-ov" onclick="if(event.target===this)closeDetailPopup()">
+  <div class="modal" style="max-width:860px">
+    <div class="modal-hdr">
+      <div><div class="modal-title" id="detail-title">강의 상세 내역</div><div class="modal-sub" id="detail-sub"></div></div>
+      <button class="modal-close" onclick="closeDetailPopup()">✕</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
   </div>
 </div>
 
@@ -537,6 +550,44 @@ function fullUpdate(){
 // ═══════════════════════════════════════════
 //  RENDER (table + kpi + charts)
 // ═══════════════════════════════════════════
+// 강사별 상세 데이터 캐시 (팝업용)
+let instDetailCache = {};
+
+function openDetailPopup(inst){
+  const data = instDetailCache[inst];
+  if(!data){ return; }
+  document.getElementById('detail-title').textContent = inst + ' 강의 상세 내역';
+  document.getElementById('detail-sub').textContent =
+    '총 ' + data.details.length + '개 강의 · ' + won(data.totalDisp) + ' · 귀속액 ' + won(data.totalAtt);
+
+  const rows = data.details.map(d=>`<tr>
+    <td style="font-size:12px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(d.lecture)}">${esc(d.lecture)||'-'}</td>
+    <td>${d.types||'-'}</td>
+    <td style="font-size:12px;color:var(--text-secondary)">${esc(d.platforms)}</td>
+    <td style="font-size:12px">${esc(d.months)||'-'}</td>
+    <td class="nr">${d.qty||'-'}</td>
+    <td class="nr">${won(d.dispTot)}${!d.isPrimary?'<span title="집계 제외(공동)" style="font-size:9px;color:var(--text-tertiary);margin-left:3px">*</span>':''}</td>
+  </tr>`).join('');
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="tbl-wrap" style="margin-bottom:12px">
+      <table>
+        <thead><tr>
+          <th>강의명</th><th>유형</th><th>플랫폼</th>
+          <th>강의 오픈 월</th><th class="nr">판매수량</th><th class="nr">매출</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeDetailPopup()">닫기</button>
+      <button class="btn btn-primary" onclick="closeDetailPopup();openModal('${esc(inst)}','')">정산서 열기 →</button>
+    </div>`;
+
+  document.getElementById('detail-ov').classList.add('open');
+}
+function closeDetailPopup(){ document.getElementById('detail-ov').classList.remove('open'); }
+
 function render(){
   const filtered = getFiltered();
 
@@ -566,9 +617,9 @@ function render(){
   const kpiB2C=kpiSrc.filter(r=>r.type!=='B2B').reduce((s,r)=>s+r.revenue,0);
   const kpiTot=kpiB2B+kpiB2C;
   let kpiAtt=0;
-  const byInst={};
-  kpiSrc.forEach(r=>{ if(!byInst[r.instructor]) byInst[r.instructor]=0; byInst[r.instructor]+=r.revenue; });
-  Object.entries(byInst).forEach(([inst,rev])=>{ kpiAtt+=rev*(getRate(inst)/100); });
+  const byInstKpi={};
+  kpiSrc.forEach(r=>{ if(!byInstKpi[r.instructor]) byInstKpi[r.instructor]=0; byInstKpi[r.instructor]+=r.revenue; });
+  Object.entries(byInstKpi).forEach(([inst,rev])=>{ kpiAtt+=rev*(getRate(inst)/100); });
 
   const suf=kpiTab==='all'?' (누적)':'';
   document.getElementById('k-b2b').textContent=wonS(kpiB2B);
@@ -587,23 +638,45 @@ function render(){
   // ── table rows ──
   const maxTot=Math.max(...sorted.map(d=>d.b2b+d.b2c),1);
   let html='';
+  // 강사별로 집계 (여러 강의/플랫폼 → 1행으로 합산)
+  const byInst = {};
   sorted.forEach(d=>{
-    const tot=d.b2b+d.b2c;           // 집계용 (primary만)
-    const dispTot=d.dispB2b+d.dispB2c; // 표시용 (항상)
-    const rate=getRate(d.instructor);
-    const att=dispTot*(rate/100);       // 귀속액은 표시금액 기준
-    const tags=[...d.types].filter(Boolean).map(t=>`<span class="tag ${t==='B2B'?'tb':'tc'}">${t}</span>`).join(' ');
-    const ms2=[...d.months].sort().join(', ');
+    const inst = d.instructor;
+    if(!byInst[inst]) byInst[inst] = {
+      instructor: inst, totalQty: 0, totalDisp: 0, totalAtt: 0,
+      details: [], multiInstructor: false
+    };
+    const dispTot = d.dispB2b + d.dispB2c;
+    const rate = getRate(inst);
+    byInst[inst].totalQty  += d.qty;
+    byInst[inst].totalDisp += dispTot;
+    byInst[inst].totalAtt  += dispTot * (rate/100);
+    if(d.multiInstructor) byInst[inst].multiInstructor = true;
+    // 상세 내역 저장
+    const tags = [...d.types].filter(Boolean).map(t=>`<span class="tag ${t==='B2B'?'tb':'tc'}">${t}</span>`).join(' ');
+    const ms2 = [...d.months].sort().join(', ');
+    byInst[inst].details.push({
+      lecture: d.lecture, platforms: [...d.platforms].join(', '),
+      types: tags, months: ms2, qty: d.qty, dispTot,
+      isPrimary: d.primaryInstructor !== false
+    });
+  });
+
+  // 상세 팝업용 캐시 저장
+  instDetailCache = byInst;
+
+  Object.values(byInst).forEach(inst=>{
+    const isMulti = inst.multiInstructor;
+    const allMonths = [...new Set(inst.details.flatMap(d=>d.months.split(', ')))].sort().join(', ');
     html+=`<tr>
-      <td><span class="inst-link" onclick="openModal('${esc(d.instructor)}','${esc(ms2)}')">${esc(d.instructor)}</span>${filtered.some(r=>r.instructor===d.instructor&&r.multiInstructor)?'<span style="font-size:9px;background:#FFF3E0;color:#E65100;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:600">공동</span>':''}</td>
-      <td style="font-size:12px;color:var(--text-secondary);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(d.lecture)}">${esc(d.lecture)||'-'}</td>
-      <td>${tags||'-'}</td>
-      <td style="font-size:12px;color:var(--text-secondary)">${esc([...d.platforms].join(', '))}</td>
-      <td style="font-size:12px">${ms2||'-'}</td>
-      <td class="nr">${d.qty||'-'}</td>
-      <td class="nr">${won(dispTot)}${d.multiInstructor&&d.primaryInstructor===false?'<span title="집계 제외 (공동강의)" style="font-size:9px;color:var(--text-tertiary);margin-left:3px">*</span>':''}</td>
-      <td class="nr" style="color:var(--green);font-weight:600">${won(att)}</td>
-      <td><button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="openModal('${esc(d.instructor)}','${esc(ms2)}')">정산서</button></td>
+      <td>
+        <span class="inst-link" onclick="openDetailPopup('${esc(inst.instructor)}')">${esc(inst.instructor)}</span>
+        ${isMulti?'<span style="font-size:9px;background:#FFF3E0;color:#E65100;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:600">공동</span>':''}
+      </td>
+      <td class="nr">${inst.totalQty||'-'}</td>
+      <td class="nr">${won(inst.totalDisp)}</td>
+      <td class="nr" style="color:var(--green);font-weight:600">${won(inst.totalAtt)}</td>
+      <td><button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="openModal('${esc(inst.instructor)}','${esc(allMonths)}')">정산서</button></td>
     </tr>`;
   });
   // sum row
@@ -618,7 +691,7 @@ function render(){
       .forEach(r=>{ if(!byI[r.instructor]) byI[r.instructor]=0; byI[r.instructor]+=r.revenue; });
     return Object.entries(byI).reduce((s,[i,v])=>s+v*(getRate(i)/100),0);
   })();
-  html+=`<tr class="sum-row"><td colspan="5">합계</td><td class="nr">${sQty}</td><td class="nr">${won(sTot)}</td><td class="nr" style="color:var(--green)">${won(sAtt)}</td><td></td></tr>`;
+  html+=`<tr class="sum-row"><td>합계</td><td class="nr">${sQty}</td><td class="nr">${won(sTot)}</td><td class="nr" style="color:var(--green)">${won(sAtt)}</td><td></td></tr>`;
   document.getElementById('tbody').innerHTML=html||'<tr><td colspan="9" class="empty">조건에 맞는 데이터가 없습니다</td></tr>';
 
   // ── charts ──
