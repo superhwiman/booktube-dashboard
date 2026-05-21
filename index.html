@@ -337,18 +337,25 @@ let kpiTab = 'cur';
 let modalInst = null, modalMonths = [], modalStep = 1;
 let chartPf = null;
 
-const LS_PROF = 'elrn_profiles_v2';
+const LS_PROF = 'elrn_profiles_v3';
 function loadProf(){
   const D={"김광석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "김학균": {"rate": 40, "biz": "etc", "prepay": 1000000, "contractEnd": "2029-03"}, "박정호": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "빌더조쉬": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "샘호트만": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-03"}, "서승완": {"rate": 50, "biz": "personal", "prepay": 2000000, "contractEnd": "2029-03"}, "안승찬": {"rate": 20, "biz": "personal", "prepay": 1000000, "contractEnd": "2029-03"}, "이중용": {"rate": 50, "biz": "business", "prepay": 1000000, "contractEnd": "2029-03"}, "이효석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}};
   try{
-    const s=JSON.parse(localStorage.getItem(LS_PROF)||'{}');
+    const raw=localStorage.getItem(LS_PROF);
+    // 저장값 없거나 버전이 다르면 기본값으로 초기화
+    if(!raw){
+      localStorage.setItem(LS_PROF,JSON.stringify(D));
+      return JSON.parse(JSON.stringify(D));
+    }
+    const s=JSON.parse(raw);
+    // 새 강사 추가 시에만 기본값 병합
     let c=false;
     Object.entries(D).forEach(([n,d])=>{ if(!s[n]){s[n]=d;c=true;} });
     if(c) localStorage.setItem(LS_PROF,JSON.stringify(s));
     return s;
   }catch(e){
     localStorage.setItem(LS_PROF,JSON.stringify(D));
-    return D;
+    return JSON.parse(JSON.stringify(D));
   }
 }
 function saveProf(p){ localStorage.setItem(LS_PROF, JSON.stringify(p)); }
