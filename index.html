@@ -338,27 +338,32 @@ let modalInst = null, modalMonths = [], modalStep = 1;
 let chartPf = null;
 
 const LS_PROF = 'elrn_profiles_v3';
+let remoteProfiles = {"김광석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "김학균": {"rate": 40, "biz": "etc", "prepay": 1000000, "contractEnd": "2029-03"}, "박정호": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "빌더조쉬": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "샘호트만": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-03"}, "서승완": {"rate": 50, "biz": "personal", "prepay": 2000000, "contractEnd": "2029-03"}, "안승찬": {"rate": 20, "biz": "personal", "prepay": 1000000, "contractEnd": "2029-03"}, "이중용": {"rate": 50, "biz": "business", "prepay": 1000000, "contractEnd": "2029-03"}, "이효석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}}; // fallback defaults (profiles.json fetch 전)
 function loadProf(){
-  const D={"김광석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "김학균": {"rate": 40, "biz": "etc", "prepay": 1000000, "contractEnd": "2029-03"}, "박정호": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "빌더조쉬": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}, "샘호트만": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-03"}, "서승완": {"rate": 50, "biz": "personal", "prepay": 2000000, "contractEnd": "2029-03"}, "안승찬": {"rate": 20, "biz": "personal", "prepay": 1000000, "contractEnd": "2029-03"}, "이중용": {"rate": 50, "biz": "business", "prepay": 1000000, "contractEnd": "2029-03"}, "이효석": {"rate": 50, "biz": "business", "prepay": 2000000, "contractEnd": "2029-02"}};
+  // remoteProfiles(profiles.json) 기반으로 기본값 설정
+  // localStorage에 사용자가 수정한 값이 있으면 그것으로 덮어씀
   try{
-    const raw=localStorage.getItem(LS_PROF);
-    // 저장값 없거나 버전이 다르면 기본값으로 초기화
-    if(!raw){
-      localStorage.setItem(LS_PROF,JSON.stringify(D));
-      return JSON.parse(JSON.stringify(D));
-    }
-    const s=JSON.parse(raw);
-    // 새 강사 추가 시에만 기본값 병합
-    let c=false;
-    Object.entries(D).forEach(([n,d])=>{ if(!s[n]){s[n]=d;c=true;} });
-    if(c) localStorage.setItem(LS_PROF,JSON.stringify(s));
-    return s;
-  }catch(e){
-    localStorage.setItem(LS_PROF,JSON.stringify(D));
-    return JSON.parse(JSON.stringify(D));
-  }
+    const overrides = JSON.parse(localStorage.getItem(LS_PROF)||'{}');
+    const merged = JSON.parse(JSON.stringify(remoteProfiles));
+    // 사용자 오버라이드 병합
+    Object.entries(overrides).forEach(([n,v])=>{
+      if(!merged[n]) merged[n] = {};
+      Object.assign(merged[n], v);
+    });
+    return merged;
+  }catch(e){ return JSON.parse(JSON.stringify(remoteProfiles)); }
 }
-function saveProf(p){ localStorage.setItem(LS_PROF, JSON.stringify(p)); }
+function saveProf(p){
+  // remoteProfiles와 다른 값만 오버라이드로 저장
+  const overrides = {};
+  Object.entries(p).forEach(([name, vals])=>{
+    const base = remoteProfiles[name] || {};
+    const diff = {};
+    Object.entries(vals).forEach(([k,v])=>{ if(base[k]!==v) diff[k]=v; });
+    if(Object.keys(diff).length) overrides[name] = diff;
+  });
+  localStorage.setItem(LS_PROF, JSON.stringify(overrides));
+}
 function loadHist(){ try{ return JSON.parse(localStorage.getItem(LS_HIST)||'{}'); }catch(e){ return {}; } }
 function saveHist(h){ localStorage.setItem(LS_HIST, JSON.stringify(h)); }
 
@@ -458,6 +463,15 @@ function parseSheet(ws, fname){
 // ── AUTO FETCH FROM GITHUB PAGES ──
 async function fetchData(){
   const base = './data/';
+
+  // 1) profiles.json fetch (실패 시 내장 기본값 사용)
+  try{
+    const pr = await fetch(base + 'profiles.json?_=' + Date.now());
+    if(pr.ok){
+      remoteProfiles = await pr.json();
+    }
+  }catch(e){ console.warn('profiles.json 로드 실패, 기본값 사용'); }
+
   let fileList = [];
   try{
     const res = await fetch(base + 'files.json?_=' + Date.now());
@@ -845,7 +859,7 @@ function renderStep1(){
   const prof=loadProf()[inst]||{};
   const rate=saved.rate!==undefined?saved.rate:(prof.rate!==undefined?prof.rate:50);
   const biz=saved.biz||prof.biz||'personal';
-  const offset=saved.offset!==undefined?saved.offset:0;
+  const offset=saved.offset!==undefined?saved.offset:(prof.prepay!==undefined?prof.prepay:0);
   const paid=saved.paid!==undefined?saved.paid:0;
   const sqYear=saved.qYear||'', sqNum=saved.qNum||'';
   const allM=[...new Set(rows.map(r=>r.month).filter(Boolean))].sort();
