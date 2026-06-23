@@ -71,4 +71,10 @@
     "prepay": 2000000,
     "contractEnd": "2029-04"
   }
+  "정진일": {
+    "rate": 50,
+    "biz": "business",
+    "prepay": 2000000,
+    "contractEnd": "2029-06"
+  }
 }
